@@ -1,0 +1,842 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>LiderLog | Operations</title>
+    
+    <!-- PWA Meta -->
+    <meta name="theme-color" content="#0f172a">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="manifest" href="/manifest.json">
+
+    <!-- Typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --bg: #0f172a;
+            --surface: #1e293b;
+            --surface-light: #334155;
+            --accent: #e11d48; /* Industrial Red */
+            --accent-glow: rgba(225, 29, 72, 0.2);
+            --text: #f8fafc;
+            --text-muted: #94a3b8;
+            --success: #22c55e;
+            --danger: #ef4444;
+            --nav-height: 70px;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            overflow-x: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        h1, h2, h3 { font-family: 'Syne', sans-serif; text-transform: uppercase; letter-spacing: -0.02em; }
+
+        /* Navigation */
+        .bottom-nav {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: var(--nav-height);
+            background: var(--surface);
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            border-top: 1px solid rgba(255,255,255,0.05);
+            z-index: 1000;
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+
+        .nav-item {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            color: var(--text-muted);
+            text-decoration: none;
+            font-size: 0.7rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .nav-item.active { color: var(--accent); }
+        .nav-item i { font-size: 1.2rem; }
+        .nav-item.admin-only { display: none; }
+        body.is-admin .nav-item.admin-only { display: flex; }
+
+        /* Main Content */
+        main {
+            flex: 1;
+            padding: 20px;
+            padding-bottom: calc(var(--nav-height) + 40px);
+            max-width: 800px;
+            margin: 0 auto;
+            width: 100%;
+        }
+
+        .view { display: none; animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
+        .view.active { display: block; }
+
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Header */
+        header {
+            padding: 30px 20px 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+        }
+
+        .brand h1 { font-size: 1.8rem; line-height: 1; color: var(--text); }
+        .brand span { font-size: 0.7rem; color: var(--accent); font-weight: 800; letter-spacing: 2px; }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+        .user-info .logout-btn {
+            background: rgba(225, 29, 72, 0.1);
+            border: 1px solid var(--accent);
+            color: var(--accent);
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.7rem;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        .login-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: var(--bg);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 3000;
+            padding: 20px;
+        }
+        .login-screen.hidden { display: none; }
+        .login-box {
+            background: var(--surface);
+            padding: 40px;
+            border-radius: 8px;
+            width: 100%;
+            max-width: 350px;
+            text-align: center;
+        }
+        .login-box h2 { margin-bottom: 30px; color: var(--accent); }
+        .login-box .form-group { text-align: left; }
+        .login-box .btn { margin-top: 20px; }
+
+        /* Stats Grid */
+        .stats-summary {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-bottom: 25px;
+        }
+
+        .stat-mini {
+            background: var(--surface);
+            padding: 15px;
+            border-radius: 4px;
+            border: 1px solid rgba(255,255,255,0.05);
+        }
+
+        .stat-mini .val { font-family: 'Syne', sans-serif; font-size: 1.2rem; display: block; }
+        .stat-mini .lab { font-size: 0.6rem; color: var(--text-muted); text-transform: uppercase; font-weight: 800; }
+
+        /* Forms */
+        .card {
+            background: var(--surface);
+            padding: 25px;
+            border-radius: 4px;
+            border: 1px solid rgba(255,255,255,0.05);
+            margin-bottom: 20px;
+        }
+
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; font-size: 0.7rem; font-weight: 800; text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px; }
+        
+        input, select, textarea {
+            width: 100%;
+            background: var(--bg);
+            border: 1px solid var(--surface-light);
+            padding: 14px;
+            color: var(--text);
+            font-family: inherit;
+            border-radius: 4px;
+            font-size: 1rem;
+        }
+
+        input:focus { border-color: var(--accent); outline: none; }
+
+        .btn {
+            width: 100%;
+            padding: 16px;
+            background: var(--accent);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-family: 'Syne', sans-serif;
+            font-weight: 800;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        .btn:active { transform: scale(0.98); }
+
+        /* Delivery List */
+        .delivery-item {
+            background: var(--surface);
+            margin-bottom: 12px;
+            padding: 20px;
+            border-radius: 4px;
+            border-left: 4px solid var(--surface-light);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .delivery-item.status-entregue { border-left-color: var(--success); }
+        .delivery-item.status-pendente { border-left-color: var(--accent); }
+
+        .info h3 { font-size: 1.1rem; margin-bottom: 4px; }
+        .info p { font-size: 0.85rem; color: var(--text-muted); }
+        .meta { font-family: 'Syne', sans-serif; font-size: 0.8rem; color: var(--accent); margin-top: 5px; }
+
+        /* Modal Overlay */
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(15, 23, 42, 0.95);
+            backdrop-filter: blur(10px);
+            z-index: 2000;
+            display: none;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .modal-content { max-width: 500px; margin: 40px auto; background: var(--surface); padding: 30px; border-radius: 4px; }
+
+        /* Utility */
+        .badge { font-size: 0.6rem; font-weight: 800; padding: 2px 6px; border-radius: 2px; text-transform: uppercase; }
+        .badge-pendente { background: var(--accent); color: white; }
+        .badge-entregue { background: var(--success); color: white; }
+
+        /* Camera */
+        #cameraContainer video { width: 100%; border-radius: 4px; background: black; }
+
+        @media (min-width: 800px) {
+            .bottom-nav { top: 0; bottom: auto; height: 80px; padding: 0 40px; }
+            main { margin-top: 100px; }
+        }
+
+        /* User Management */
+        .user-list-item {
+            background: var(--bg);
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .user-list-item .user-role { font-size: 0.6rem; background: var(--surface-light); padding: 2px 6px; border-radius: 2px; }
+    </style>
+</head>
+<body>
+
+    <!-- TELA DE LOGIN -->
+    <div id="loginScreen" class="login-screen">
+        <div class="login-box">
+            <h2>LIDERLOG</h2>
+            <div class="form-group">
+                <label>Usuário</label>
+                <input type="text" id="loginUsername" placeholder="Seu usuário">
+            </div>
+            <div class="form-group">
+                <label>Senha</label>
+                <input type="password" id="loginPassword" placeholder="Sua senha">
+            </div>
+            <button class="btn" onclick="login()">ENTRAR</button>
+            <p id="loginError" style="color: var(--danger); margin-top: 15px; display: none;"></p>
+        </div>
+    </div>
+
+    <header>
+        <div class="brand">
+            <span>LOGISTICS OPS</span>
+            <h1>LIDERLOG</h1>
+        </div>
+        <div class="user-info">
+            <span id="connectionStatus" class="badge">Online</span>
+            <span id="userName"></span>
+            <button class="logout-btn" onclick="logout()">Sair</button>
+        </div>
+    </header>
+
+    <main>
+        <!-- VIEW: ENTREGAS -->
+        <section id="view-list" class="view active">
+            <div class="stats-summary">
+                <div class="stat-mini">
+                    <span class="lab">Total</span>
+                    <span class="val" id="totalEntregas">0</span>
+                </div>
+                <div class="stat-mini">
+                    <span class="lab">Concluídas</span>
+                    <span class="val" id="totalEntregues">0</span>
+                </div>
+                <div class="stat-mini">
+                    <span class="lab">Pendentes</span>
+                    <span class="val" id="totalPendentes">0</span>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <input type="text" id="searchInput" placeholder="Filtrar por NF ou Cliente...">
+            </div>
+
+            <div id="deliveriesList">
+                <p style="text-align: center; color: var(--text-muted); padding: 40px;">Sincronizando dados...</p>
+            </div>
+        </section>
+
+        <!-- VIEW: NOVO -->
+        <section id="view-add" class="view">
+            <h2 style="margin-bottom: 25px;">Novo Registro</h2>
+            <div class="card">
+                <form id="deliveryForm">
+                    <div class="form-group">
+                        <label>Nota Fiscal (NF)</label>
+                        <input type="text" id="nfNumber" required placeholder="Ex: 123456">
+                    </div>
+                    <div class="form-group">
+                        <label>Cliente</label>
+                        <input type="text" id="client" required placeholder="Nome do Destinatário">
+                    </div>
+                    <div class="form-group">
+                        <label>Empresa Responsável</label>
+                        <select id="company">
+                            <option value="LDR">LDR (LIDERLOG)</option>
+                            <option value="AGR">AGR</option>
+                            <option value="APL">APL</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Motorista</label>
+                        <input type="text" id="driver" list="driversDataList" placeholder="Selecione ou digite o nome">
+                        <datalist id="driversDataList">
+                            <!-- Injetado via JS -->
+                        </datalist>
+                    </div>
+                    <div class="form-group">
+                        <label>Endereço Completo</label>
+                        <input type="text" id="address" required placeholder="Rua, Número, Bairro">
+                    </div>
+                    <div class="form-group">
+                        <label>Cidade / UF</label>
+                        <input type="text" id="city" placeholder="Cidade - UF">
+                    </div>
+                    <div class="form-group">
+                        <label>Contato (Telefone)</label>
+                        <input type="tel" id="phone" placeholder="(00) 00000-0000">
+                    </div>
+                    <div class="form-group">
+                        <label>Valor da Carga (R$)</label>
+                        <input type="number" id="value" step="0.01" placeholder="0,00">
+                    </div>
+                    <div class="form-group">
+                        <label>Observações</label>
+                        <textarea id="observations" rows="3" placeholder="Instruções de entrega..."></textarea>
+                    </div>
+                    <button type="submit" class="btn">Confirmar Cadastro</button>
+                </form>
+            </div>
+        </section>
+
+        <!-- VIEW: USUÁRIOS (Admin Only) -->
+        <section id="view-users" class="view">
+            <h2 style="margin-bottom: 25px;">Gestão de Usuários</h2>
+            <div class="card">
+                <h3>Novo Usuário</h3>
+                <div class="form-group" style="margin-top: 15px;">
+                    <label>Nome Completo</label>
+                    <input type="text" id="newFullname" placeholder="Nome do Motorista">
+                </div>
+                <div class="form-group">
+                    <label>Usuário (Login)</label>
+                    <input type="text" id="newUsername" placeholder="login.usuario">
+                </div>
+                <div class="form-group">
+                    <label>Senha Inicial</label>
+                    <input type="password" id="newPassword" placeholder="Mínimo 6 caracteres">
+                </div>
+                <div class="form-group">
+                    <label>Cargo</label>
+                    <select id="newRole">
+                        <option value="motorista">Motorista</option>
+                        <option value="admin">Administrador</option>
+                    </select>
+                </div>
+                <button class="btn" onclick="createUser()">Cadastrar Usuário</button>
+            </div>
+
+            <div id="usersListArea" style="margin-top: 30px;">
+                <h3>Usuários Ativos</h3>
+                <div id="usersList" style="margin-top: 15px;">
+                    <!-- Injected via JS -->
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <nav class="bottom-nav">
+        <div class="nav-item active" onclick="switchView('list')">
+            <i>📋</i>
+            <span>Entregas</span>
+        </div>
+        <div class="nav-item admin-only" onclick="switchView('add')">
+            <i>➕</i>
+            <span>Novo</span>
+        </div>
+        <div class="nav-item admin-only" onclick="switchView('users')">
+            <i>👥</i>
+            <span>Usuários</span>
+        </div>
+        <div class="nav-item" onclick="logout()" style="color: var(--danger); opacity: 0.8;">
+            <i>🚪</i>
+            <span>Sair</span>
+        </div>
+    </nav>
+
+    <!-- MODAL: DETALHES -->
+    <div id="deliveryModal" class="modal">
+        <div class="modal-content">
+            <h2 id="modalTitle" style="margin-bottom: 10px;">Entrega</h2>
+            <div id="modalInfo" style="margin-bottom: 25px; color: var(--text-muted); font-size: 0.9rem;"></div>
+            <div id="actionArea"></div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE_URL = '/api';
+        let deliveries = [];
+        let currentDeliveryId = null;
+        let currentCanhotoBase64 = null;
+        let webcamStream = null;
+        let authToken = localStorage.getItem('token');
+        let currentUser = JSON.parse(localStorage.getItem('user') || 'null');
+
+        // Auth
+        async function login() {
+            const username = document.getElementById('loginUsername').value.trim();
+            const password = document.getElementById('loginPassword').value.trim();
+            const errorEl = document.getElementById('loginError');
+            errorEl.style.display = 'none';
+            
+            console.log('Tentando login com:', username);
+
+            try {
+                const formData = new FormData();
+                formData.append('username', username);
+                formData.append('password', password);
+                
+                const response = await fetch(`${API_BASE_URL}/auth/login`, { 
+                    method: 'POST', 
+                    body: formData 
+                });
+                
+                if (!response.ok) {
+                    const errData = await response.json();
+                    console.error('Erro no login:', errData);
+                    throw new Error(errData.detail || 'Falha no login');
+                }
+                
+                const data = await response.json();
+                authToken = data.access_token;
+                localStorage.setItem('token', authToken);
+                
+                console.log('Token obtido, buscando informações do usuário...');
+
+                const meResp = await fetch(`${API_BASE_URL}/auth/me`, {
+                    headers: {'Authorization': `Bearer ${authToken}`}
+                });
+                
+                if (!meResp.ok) throw new Error('Erro ao obter perfil');
+
+                currentUser = await meResp.json();
+                localStorage.setItem('user', JSON.stringify(currentUser));
+                
+                console.log('Login bem sucedido! Usuário:', currentUser.username);
+                initApp();
+            } catch (err) {
+                console.error('Falha geral no processo de login:', err);
+                errorEl.textContent = err.message || 'Usuário ou senha incorretos';
+                errorEl.style.display = 'block';
+            }
+        }
+
+        function logout() {
+            localStorage.clear();
+            location.reload();
+        }
+
+        function initApp() {
+            if (!authToken) {
+                document.getElementById('loginScreen').classList.remove('hidden');
+                return;
+            }
+            document.getElementById('loginScreen').classList.add('hidden');
+            document.getElementById('userName').textContent = currentUser.username;
+            
+            if (currentUser.role === 'admin') {
+                document.body.classList.add('is-admin');
+            } else {
+                document.body.classList.remove('is-admin');
+            }
+            
+            switchView('list');
+            loadData();
+            loadDriversList(); // Carrega a lista de sugestões de motoristas
+        }
+
+        async function loadDriversList() {
+            try {
+                console.log('Buscando lista de motoristas...');
+                const resp = await authFetch(`${API_BASE_URL}/drivers`);
+                if (!resp.ok) {
+                    console.error('Falha ao buscar motoristas:', resp.status);
+                    return;
+                }
+                const drivers = await resp.json();
+                console.log('Motoristas encontrados:', drivers.length);
+                
+                const datalist = document.getElementById('driversDataList');
+                // Limpa e preenche
+                datalist.innerHTML = drivers.map(d => {
+                    const name = d.full_name || d.username;
+                    return `<option value="${name}">${d.username}</option>`;
+                }).join('');
+            } catch (e) {
+                console.error("Erro ao carregar lista de motoristas:", e);
+            }
+        }
+
+        // Navigation
+        function switchView(view) {
+            document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+            
+            document.getElementById(`view-${view}`).classList.add('active');
+            
+            // Ativa o ícone correto
+            const navItems = document.querySelectorAll('.nav-item');
+            if (view === 'list') navItems[0].classList.add('active');
+            if (view === 'add') {
+                navItems[1].classList.add('active');
+                loadDriversList(); // Atualiza a lista sempre que for cadastrar novo
+            }
+            if (view === 'users') navItems[2].classList.add('active');
+
+            if (view === 'users') loadUsers();
+            if (view === 'list') loadData();
+        }
+
+        async function authFetch(url, options = {}) {
+            options.headers = { ...options.headers, 'Authorization': `Bearer ${authToken}` };
+            const resp = await fetch(url, options);
+            if (resp.status === 401) logout();
+            return resp;
+        }
+
+        async function loadData() {
+            try {
+                const response = await authFetch(`${API_BASE_URL}/deliveries`);
+                deliveries = await response.json();
+                renderDeliveries();
+                updateStats();
+            } catch (e) { showNotification('Erro ao carregar dados', 'error'); }
+        }
+
+        async function updateStats() {
+            const resp = await authFetch(`${API_BASE_URL}/stats`);
+            const stats = await resp.json();
+            document.getElementById('totalEntregas').textContent = stats.total;
+            document.getElementById('totalEntregues').textContent = stats.entregues;
+            document.getElementById('totalPendentes').textContent = stats.pendentes;
+        }
+
+        function renderDeliveries() {
+            const search = document.getElementById('searchInput').value.toLowerCase();
+            const list = document.getElementById('deliveriesList');
+            const filtered = deliveries.filter(d => d.client.toLowerCase().includes(search) || d.nf_number.includes(search));
+            const isAdmin = currentUser?.role === 'admin';
+
+            if (filtered.length === 0) {
+                list.innerHTML = `<p style="text-align: center; color: var(--text-muted); padding: 40px;">Nenhum registro.</p>`;
+                return;
+            }
+
+            list.innerHTML = filtered.map(d => `
+                <div class="delivery-item status-${d.status}" onclick="openDetails(${d.id})">
+                    <div class="info">
+                        <div style="display: flex; gap: 5px; margin-bottom: 5px;">
+                            <span class="badge" style="background: rgba(255,255,255,0.1); color: var(--text-muted);">${d.company || 'LDR'}</span>
+                            ${isAdmin ? `<span class="badge" style="background: var(--accent-glow); color: var(--accent); border: 1px solid var(--accent);">👤 ${d.user_name || 'Sistema'}</span>` : ''}
+                        </div>
+                        <h3>${d.client}</h3>
+                        <p>${d.address}</p>
+                        <div class="meta">NF #${d.nf_number} • R$ ${d.value?.toFixed(2) || '0.00'}</div>
+                    </div>
+                    <div class="status"><span class="badge badge-${d.status}">${d.status}</span></div>
+                </div>
+            `).join('');
+        }
+
+        // User Management (Admin Only)
+        async function loadUsers() {
+            const resp = await authFetch(`${API_BASE_URL}/auth/users`);
+            if (!resp.ok) return;
+            const users = await resp.json();
+            document.getElementById('usersList').innerHTML = users.map(u => `
+                <div class="user-list-item">
+                    <div>
+                        <div style="font-weight: 700;">${u.full_name || u.username}</div>
+                        <div style="font-size: 0.7rem; color: var(--text-muted);">@${u.username}</div>
+                    </div>
+                    <span class="user-role">${u.role}</span>
+                </div>
+            `).join('');
+        }
+
+        async function createUser() {
+            const username = document.getElementById('newUsername').value.trim();
+            const password = document.getElementById('newPassword').value.trim();
+            const fullName = document.getElementById('newFullname').value.trim();
+            const role = document.getElementById('newRole').value;
+
+            if (!username || !password) {
+                return showNotification('Login e senha são obrigatórios', 'error');
+            }
+
+            try {
+                const resp = await authFetch(`${API_BASE_URL}/auth/register`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ 
+                        username: username, 
+                        password: password, 
+                        full_name: fullName, 
+                        role: role 
+                    })
+                });
+
+                if (resp.ok) {
+                    showNotification('Usuário criado com sucesso!', 'success');
+                    document.getElementById('newUsername').value = '';
+                    document.getElementById('newPassword').value = '';
+                    document.getElementById('newFullname').value = '';
+                    loadUsers(); // Recarrega a lista
+                } else {
+                    const err = await resp.json();
+                    showNotification(err.detail || 'Erro ao criar usuário', 'error');
+                }
+            } catch (err) {
+                showNotification('Erro de conexão com o servidor', 'error');
+            }
+        }
+
+        // (Resto das funções de entrega, modal, câmera...)
+        function openDetails(id) {
+            const d = deliveries.find(x => x.id === id);
+            currentDeliveryId = id;
+            currentCanhotoBase64 = null; // Reseta imagem anterior
+            
+            document.getElementById('modalTitle').textContent = `NF #${d.nf_number}`;
+            document.getElementById('modalInfo').innerHTML = `
+                <div style="font-weight:700;">${d.client}</div>
+                <div style="font-size: 0.8rem;">${d.address}</div>
+                ${d.observations ? `<div style="margin-top:5px; font-style:italic; font-size:0.8rem;">Obs: ${d.observations}</div>` : ''}
+            `;
+            
+            const area = document.getElementById('actionArea');
+            if (d.status === 'entregue') {
+                area.innerHTML = `
+                    <p style="color:var(--success); font-weight:700; margin-bottom:15px;">✓ ENTREGUE EM ${d.delivered_at ? new Date(d.delivered_at).toLocaleDateString() : '-'}</p>
+                    ${d.delivery_canhoto_url ? `<img src="${d.delivery_canhoto_url}" style="width:100%; border-radius:4px; margin-bottom:15px; border:1px solid var(--surface-light);">` : ''}
+                    <button class="btn" style="background:var(--surface-light);" onclick="updateStatus(${id}, 'pendente')">Reverter para Pendente</button>
+                    <button class="btn" style="background:transparent; color:var(--text-muted); margin-top:10px;" onclick="closeModal()">Fechar</button>
+                `;
+            } else {
+                area.innerHTML = `
+                    <div class="form-group">
+                        <label>Comprovante (Canhoto)</label>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                            <button class="btn" style="background: var(--surface-light); padding: 12px;" onclick="startCamera()">📷 Câmera</button>
+                            <button class="btn" style="background: var(--surface-light); padding: 12px;" onclick="uploadFromGallery()">📁 Galeria</button>
+                        </div>
+                    </div>
+
+                    <div id="cameraContainer" style="display: none; margin-bottom: 20px;">
+                        <video id="webcam" autoplay playsinline style="width:100%; border-radius:4px; background:black;"></video>
+                        <button class="btn" style="margin-top: 10px;" onclick="capturePhoto()">Tirar Foto</button>
+                    </div>
+
+                    <div id="imagePreview" style="margin-bottom: 20px;"></div>
+                    <input type="file" id="canhotoFile" accept="image/*" style="display: none;">
+
+                    <div class="form-group">
+                        <label>Observações da Entrega</label>
+                        <textarea id="obs" rows="2" placeholder="Alguma ocorrência?"></textarea>
+                    </div>
+                    
+                    <button class="btn" id="confirmBtn" onclick="confirmDelivery()">Finalizar Entrega</button>
+                    <button class="btn" style="background:transparent; color:var(--text-muted); margin-top:10px;" onclick="closeModal()">Cancelar</button>
+                `;
+            }
+            document.getElementById('deliveryModal').style.display = 'block';
+        }
+
+        // --- LÓGICA DE CÂMERA E IMAGEM ---
+        async function startCamera() {
+            document.getElementById('cameraContainer').style.display = 'block';
+            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+            document.getElementById('webcam').srcObject = stream;
+            webcamStream = stream;
+        }
+
+        function stopCamera() {
+            if (webcamStream) webcamStream.getTracks().forEach(t => t.stop());
+            document.getElementById('cameraContainer').style.display = 'none';
+        }
+
+        function capturePhoto() {
+            const v = document.getElementById('webcam');
+            const c = document.createElement('canvas');
+            c.width = v.videoWidth; c.height = v.videoHeight;
+            c.getContext('2d').drawImage(v, 0, 0);
+            currentCanhotoBase64 = c.toDataURL('image/jpeg');
+            document.getElementById('imagePreview').innerHTML = `<img src="${currentCanhotoBase64}" style="width:100%; border-radius: 4px; border: 2px solid var(--accent);">`;
+            stopCamera();
+        }
+
+        function uploadFromGallery() {
+            const input = document.getElementById('canhotoFile');
+            input.onchange = (e) => {
+                const file = e.target.files[0];
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    currentCanhotoBase64 = ev.target.result;
+                    document.getElementById('imagePreview').innerHTML = `<img src="${currentCanhotoBase64}" style="width:100%; border-radius: 4px; border: 2px solid var(--accent);">`;
+                };
+                reader.readAsDataURL(file);
+            };
+            input.click();
+        }
+
+        async function confirmDelivery() {
+            const obs = document.getElementById('obs').value;
+            const formData = new FormData();
+            formData.append('delivery_observations', obs);
+
+            if (currentCanhotoBase64) {
+                const blob = await fetch(currentCanhotoBase64).then(r => r.blob());
+                formData.append('delivery_canhoto', blob, 'canhoto.jpg');
+            }
+
+            const resp = await authFetch(`${API_BASE_URL}/deliveries/${currentDeliveryId}/confirm`, { 
+                method: 'PATCH', 
+                body: formData 
+            });
+            
+            if (resp.ok) {
+                showNotification('Entrega finalizada com sucesso!');
+                closeModal();
+                loadData();
+            } else {
+                showNotification('Erro ao finalizar entrega', 'error');
+            }
+        }
+
+        async function updateStatus(id, s) {
+            const resp = await authFetch(`${API_BASE_URL}/deliveries/${id}/status`, {
+                method: 'PATCH',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({status: s})
+            });
+            if (resp.ok) {
+                showNotification('Status atualizado');
+                closeModal();
+                loadData();
+            }
+        }
+
+        function closeModal() { document.getElementById('deliveryModal').style.display = 'none'; }
+
+        document.getElementById('deliveryForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = new FormData();
+            formData.append('nf_number', document.getElementById('nfNumber').value);
+            formData.append('client', document.getElementById('client').value);
+            formData.append('address', document.getElementById('address').value);
+            formData.append('company', document.getElementById('company').value);
+            formData.append('value', document.getElementById('value').value || 0);
+            formData.append('observations', document.getElementById('observations').value);
+            formData.append('driver', document.getElementById('driver').value);
+            
+            const resp = await authFetch(`${API_BASE_URL}/deliveries`, { method: 'POST', body: formData });
+            if (resp.ok) {
+                showNotification('Entrega cadastrada!');
+                e.target.reset();
+                switchView('list');
+            } else {
+                showNotification('Erro ao cadastrar', 'error');
+            }
+        });
+
+        function showNotification(m, type = 'success') {
+            const n = document.createElement('div');
+            n.textContent = m;
+            const bgColor = type === 'error' ? 'var(--danger)' : 'var(--accent)';
+            n.style.cssText = `position:fixed; bottom:90px; left:50%; transform:translateX(-50%); background:${bgColor}; color:white; padding:12px 24px; border-radius:40px; z-index:3000; box-shadow: 0 4px 12px rgba(0,0,0,0.3); font-weight: 700;`;
+            document.body.appendChild(n);
+            setTimeout(() => n.remove(), 3000);
+        }
+
+        document.getElementById('searchInput').addEventListener('input', renderDeliveries);
+        initApp();
+    </script>
+</body>
+</html>
