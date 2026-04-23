@@ -9,7 +9,7 @@ class UserCreate(BaseModel):
     username: str = Field(..., min_length=3, max_length=50)
     password: str = Field(..., min_length=6)
     full_name: Optional[str] = None
-    role: str = Field(default="motorista", pattern="^(admin|motorista)$")
+    role: str = Field(default="motorista", pattern="^(admin|motorista|monitor)$")
 
 
 class UserResponse(BaseModel):

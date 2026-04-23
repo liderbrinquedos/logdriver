@@ -2,11 +2,14 @@ from fastapi import FastAPI, Depends, HTTPException, Query, UploadFile, File, Fo
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime
 import os
+import csv
+from io import StringIO, BytesIO
+import openpyxl
 
 from database import engine, get_db
 from models import Base, Delivery, User
@@ -43,6 +46,11 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
 def require_admin(user: User = Depends(get_current_user)):
     if user.role != "admin":
         raise HTTPException(status_code=403, detail="Acesso restrito a administradores")
+    return user
+
+def require_admin_or_monitor(user: User = Depends(get_current_user)):
+    if user.role not in ["admin", "monitor"]:
+        raise HTTPException(status_code=403, detail="Acesso restrito")
     return user
 
 # Criar tabelas no banco
@@ -86,6 +94,29 @@ def get_canhoto_url(path: Optional[str]) -> Optional[str]:
     if not path: return None
     if path.startswith("http"): return path
     return path
+
+
+def format_delivery_response(d: Delivery) -> dict:
+    return {
+        "id": d.id,
+        "nf_number": d.nf_number,
+        "client": d.client,
+        "address": d.address,
+        "city": d.city,
+        "phone": d.phone,
+        "value": d.value,
+        "driver": d.driver,
+        "company": d.company,
+        "observations": d.observations,
+        "canhoto_url": get_canhoto_url(d.canhoto_path),
+        "status": d.status,
+        "delivery_canhoto_url": get_canhoto_url(d.delivery_canhoto_path),
+        "delivery_observations": d.delivery_observations,
+        "delivered_at": d.delivered_at,
+        "created_at": d.created_at,
+        "user_id": d.user_id,
+        "user_name": d.owner.username if d.owner else "Sistema",
+    }
 
 
 # ==================== AUTENTICAÇÃO ====================
@@ -137,34 +168,11 @@ def get_me(current_user: User = Depends(get_current_user)):
     return current_user
 
 
-def format_delivery_response(d: Delivery) -> dict:
-    return {
-        "id": d.id,
-        "nf_number": d.nf_number,
-        "client": d.client,
-        "address": d.address,
-        "city": d.city,
-        "phone": d.phone,
-        "value": d.value,
-        "driver": d.driver,
-        "company": d.company,
-        "observations": d.observations,
-        "canhoto_url": get_canhoto_url(d.canhoto_path),
-        "status": d.status,
-        "delivery_canhoto_url": get_canhoto_url(d.delivery_canhoto_path),
-        "delivery_observations": d.delivery_observations,
-        "delivered_at": d.delivered_at,
-        "created_at": d.created_at,
-        "user_id": d.user_id,
-        "user_name": d.owner.username if d.owner else "Sistema",
-    }
-
-
 # --- Estatísticas ---
 @app.get("/api/stats", response_model=DeliveryStats)
 def get_stats(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     query = db.query(Delivery)
-    if current_user.role != "admin":
+    if current_user.role not in ["admin", "monitor"]:
         name_filter = current_user.full_name if current_user.full_name else current_user.username
         query = query.filter(
             (Delivery.user_id == current_user.id) | 
@@ -190,7 +198,7 @@ def list_deliveries(
     db: Session = Depends(get_db),
 ):
     query = db.query(Delivery)
-    if current_user.role != "admin":
+    if current_user.role not in ["admin", "monitor"]:
         # Vê se o user_id bate OU se o nome/username dele está no campo driver
         name_filter = current_user.full_name if current_user.full_name else current_user.username
         query = query.filter(
@@ -210,6 +218,87 @@ def list_deliveries(
 
     deliveries = query.order_by(Delivery.created_at.desc()).offset(skip).limit(limit).all()
     return [format_delivery_response(d) for d in deliveries]
+
+# --- Importar Excel ---
+@app.post("/api/deliveries/import")
+async def import_deliveries(
+    file: UploadFile = File(...),
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    if not file.filename.endswith(('.xlsx', '.xls')):
+        raise HTTPException(status_code=400, detail="Formato de arquivo inválido. Use Excel (.xlsx)")
+
+    try:
+        contents = await file.read()
+        wb = openpyxl.load_workbook(BytesIO(contents))
+        sheet = wb.active
+        
+        deliveries_imported = 0
+        # Pular cabeçalho
+        for row in sheet.iter_rows(min_row=2, values_only=True):
+            if not row[0]: continue 
+            
+            nf, client, addr, city, phone, val, driver, comp, obs = row[:9]
+            
+            target_user_id = None
+            if driver:
+                d_clean = str(driver).strip().lower()
+                d_user = db.query(User).filter(
+                    (User.full_name.ilike(d_clean)) | (User.username.ilike(d_clean))
+                ).first()
+                if d_user: target_user_id = d_user.id
+
+            db_delivery = Delivery(
+                nf_number=str(nf),
+                client=str(client),
+                address=str(addr),
+                city=str(city) if city else None,
+                phone=str(phone) if phone else None,
+                value=float(val) if val else 0.0,
+                driver=str(driver) if driver else None,
+                company=str(comp) if comp else "LDR",
+                observations=str(obs) if obs else None,
+                created_at=datetime.utcnow(),
+                user_id=target_user_id,
+            )
+            db.add(db_delivery)
+            deliveries_imported += 1
+        
+        db.commit()
+        return {"detail": f"{deliveries_imported} entregas importadas com sucesso!"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Erro ao processar arquivo: {str(e)}")
+
+# --- Exportar CSV ---
+@app.get("/api/deliveries/export")
+def export_deliveries(
+    current_user: User = Depends(require_admin_or_monitor),
+    db: Session = Depends(get_db)
+):
+    query = db.query(Delivery)
+    if current_user.role not in ["admin", "monitor"]:
+        query = query.filter(Delivery.user_id == current_user.id)
+    
+    deliveries = query.all()
+    
+    output = StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["ID", "NF", "Cliente", "Endereco", "Status", "Motorista", "Valor", "Data Criacao", "Data Entrega"])
+    
+    for d in deliveries:
+        writer.writerow([
+            d.id, d.nf_number, d.client, d.address, d.status, 
+            d.driver, d.value, d.created_at, d.delivered_at
+        ])
+    
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=entregas_liderlog.csv"}
+    )
 
 # --- Criar entrega ---
 @app.post("/api/deliveries", response_model=DeliveryResponse, status_code=201)
@@ -231,11 +320,9 @@ async def create_delivery(
     if canhoto:
         canhoto_path = save_upload_file(canhoto, nf_number, "original")
 
-    # Lógica para vincular ao usuário correto
-    target_user_id = None # Default para None se não achar motorista
+    target_user_id = None 
     if driver:
         driver_clean = driver.strip().lower()
-        # Busca insensível a maiúsculas/minúsculas
         driver_user = db.query(User).filter(
             (User.full_name.ilike(driver_clean)) | (User.username.ilike(driver_clean))
         ).first()
@@ -341,14 +428,17 @@ def health_check():
 # === ROTA CATCH-ALL PARA FRONTEND (DEVE SER A ÚLTIMA) ===
 @app.get("/{full_path:path}")
 async def serve_frontend(full_path: str):
-    from fastapi.responses import FileResponse
+    # Se a rota começar com api/ e chegou aqui, é porque a rota não existe
     if full_path.startswith("api"):
-        return HTMLResponse(content="Not Found", status_code=404)
+        return JSONResponse(status_code=404, content={"detail": f"Rota de API '{full_path}' não encontrada"})
+        
     if full_path == "" or full_path == "/":
         return FileResponse(os.path.join(FRONTEND_DIR, "LiderLog.html"))
+    
     file_path = os.path.join(FRONTEND_DIR, full_path)
     if os.path.isfile(file_path):
         return FileResponse(file_path)
+        
     return FileResponse(os.path.join(FRONTEND_DIR, "LiderLog.html"))
 
 

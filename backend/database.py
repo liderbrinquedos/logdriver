@@ -3,9 +3,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
-# Pegar o diretório onde este arquivo está (backend/)
+# Diretório para o banco de dados
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE_DIR, "liderlog.db")
+DATA_DIR = os.path.join(BASE_DIR, "data")
+os.makedirs(DATA_DIR, exist_ok=True)
+
+DB_PATH = os.path.join(DATA_DIR, "liderlog.db")
 
 SQLALCHEMY_DATABASE_URL = f"sqlite:///{DB_PATH}"
 

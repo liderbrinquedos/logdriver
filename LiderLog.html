@@ -79,6 +79,13 @@
         .nav-item i { font-size: 1.2rem; }
         .nav-item.admin-only { display: none; }
         body.is-admin .nav-item.admin-only { display: flex; }
+        
+        /* Visibilidade para Admin e Monitor */
+        .admin-monitor-only { display: none; }
+        body.is-admin .admin-monitor-only, body.is-monitor .admin-monitor-only { display: block; }
+        
+        .admin-only { display: none; }
+        body.is-admin .admin-only { display: block; }
 
         /* Main Content */
         main {
@@ -309,6 +316,10 @@
     <main>
         <!-- VIEW: ENTREGAS -->
         <section id="view-list" class="view active">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2 style="margin: 0;">Operações</h2>
+                <button class="btn admin-monitor-only" style="width: auto; padding: 8px 15px; font-size: 0.7rem; background: var(--surface-light);" onclick="exportData()">📥 Exportar CSV</button>
+            </div>
             <div class="stats-summary">
                 <div class="stat-mini">
                     <span class="lab">Total</span>
@@ -335,7 +346,11 @@
 
         <!-- VIEW: NOVO -->
         <section id="view-add" class="view">
-            <h2 style="margin-bottom: 25px;">Novo Registro</h2>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px;">
+                <h2 style="margin: 0;">Novo Registro</h2>
+                <button class="btn admin-only" style="width: auto; padding: 8px 15px; font-size: 0.7rem; background: var(--success);" onclick="document.getElementById('excelImport').click()">📊 Importar Excel</button>
+                <input type="file" id="excelImport" accept=".xlsx, .xls" style="display: none;" onchange="importExcel(this)">
+            </div>
             <div class="card">
                 <form id="deliveryForm">
                     <div class="form-group">
@@ -407,6 +422,7 @@
                     <label>Cargo</label>
                     <select id="newRole">
                         <option value="motorista">Motorista</option>
+                        <option value="monitor">Monitor (Apenas Visualização)</option>
                         <option value="admin">Administrador</option>
                     </select>
                 </div>
@@ -479,9 +495,13 @@
                 });
                 
                 if (!response.ok) {
-                    const errData = await response.json();
-                    console.error('Erro no login:', errData);
-                    throw new Error(errData.detail || 'Falha no login');
+                    const contentType = response.headers.get("content-type");
+                    if (contentType && contentType.indexOf("application/json") !== -1) {
+                        const errData = await response.json();
+                        throw new Error(errData.detail || 'Falha no login');
+                    } else {
+                        throw new Error('Servidor retornou erro inesperado (HTML)');
+                    }
                 }
                 
                 const data = await response.json();
@@ -521,15 +541,64 @@
             document.getElementById('loginScreen').classList.add('hidden');
             document.getElementById('userName').textContent = currentUser.username;
             
+            // Controle de visualização por cargo
+            document.body.classList.remove('is-admin', 'is-monitor');
             if (currentUser.role === 'admin') {
                 document.body.classList.add('is-admin');
-            } else {
-                document.body.classList.remove('is-admin');
+            } else if (currentUser.role === 'monitor') {
+                document.body.classList.add('is-monitor');
             }
             
             switchView('list');
             loadData();
-            loadDriversList(); // Carrega a lista de sugestões de motoristas
+            loadDriversList();
+        }
+
+        async function importExcel(input) {
+            const file = input.files[0];
+            if (!file) return;
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            showNotification('Processando planilha...', 'success');
+
+            try {
+                const resp = await authFetch(`${API_BASE_URL}/deliveries/import`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (resp.ok) {
+                    const res = await resp.json();
+                    showNotification(res.detail, 'success');
+                    loadData();
+                } else {
+                    const err = await resp.json();
+                    showNotification(err.detail || 'Erro na importação', 'error');
+                }
+            } catch (e) {
+                showNotification('Erro ao conectar com o servidor', 'error');
+            }
+            input.value = ''; // Reseta input
+        }
+
+        async function exportData() {
+            try {
+                const resp = await authFetch(`${API_BASE_URL}/deliveries/export`);
+                if (resp.ok) {
+                    const blob = await resp.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `relatorio_entregas_${new Date().toLocaleDateString()}.csv`;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                }
+            } catch (e) {
+                showNotification('Erro ao exportar dados', 'error');
+            }
         }
 
         async function loadDriversList() {
@@ -691,13 +760,22 @@
                 ${d.observations ? `<div style="margin-top:5px; font-style:italic; font-size:0.8rem;">Obs: ${d.observations}</div>` : ''}
             `;
             
+            const isAdmin = currentUser?.role === 'admin';
+            const isMonitor = currentUser?.role === 'monitor';
+            const canEdit = isAdmin || (currentUser?.role === 'motorista' && d.status === 'pendente');
+
             const area = document.getElementById('actionArea');
             if (d.status === 'entregue') {
                 area.innerHTML = `
                     <p style="color:var(--success); font-weight:700; margin-bottom:15px;">✓ ENTREGUE EM ${d.delivered_at ? new Date(d.delivered_at).toLocaleDateString() : '-'}</p>
                     ${d.delivery_canhoto_url ? `<img src="${d.delivery_canhoto_url}" style="width:100%; border-radius:4px; margin-bottom:15px; border:1px solid var(--surface-light);">` : ''}
-                    <button class="btn" style="background:var(--surface-light);" onclick="updateStatus(${id}, 'pendente')">Reverter para Pendente</button>
+                    ${isAdmin ? `<button class="btn" style="background:var(--surface-light);" onclick="updateStatus(${id}, 'pendente')">Reverter para Pendente</button>` : ''}
                     <button class="btn" style="background:transparent; color:var(--text-muted); margin-top:10px;" onclick="closeModal()">Fechar</button>
+                `;
+            } else if (isMonitor) {
+                area.innerHTML = `
+                    <p style="color:var(--accent); font-weight:700; margin-bottom:15px;">Aguardando Entrega</p>
+                    <button class="btn" style="background:transparent; color:var(--text-muted);" onclick="closeModal()">Fechar</button>
                 `;
             } else {
                 area.innerHTML = `
