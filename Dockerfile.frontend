@@ -1,0 +1,12 @@
+FROM nginx:alpine
+
+# Copiar os arquivos estáticos
+COPY LiderLog.html /usr/share/nginx/html/index.html
+COPY LiderLog.html /usr/share/nginx/html/LiderLog.html
+COPY manifest.json /usr/share/nginx/html/manifest.json
+COPY sw.js /usr/share/nginx/html/sw.js
+
+# Copiar a configuração do Nginx
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 80
