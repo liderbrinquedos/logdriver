@@ -23,6 +23,7 @@ class Delivery(Base):
     __tablename__ = "deliveries"
 
     id = Column(Integer, primary_key=True, index=True)
+    nrunico = Column(Integer, nullable=True, index=True)
     nf_number = Column(String, index=True, nullable=False)
     client = Column(String, nullable=False)
     address = Column(String, nullable=False)

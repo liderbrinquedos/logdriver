@@ -4,8 +4,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, StreamingResponse
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 import csv
 from io import StringIO, BytesIO
@@ -98,8 +99,9 @@ def get_canhoto_url(path: Optional[str]) -> Optional[str]:
 
 def format_delivery_response(d: Delivery) -> dict:
     return {
-        "id": d.id,
-        "nf_number": d.nf_number,
+        "id": int(d.id) if d.id else 0,
+        "nrunico": int(d.nrunico) if d.nrunico else 0,
+        "nf_number": str(int(float(d.nf_number))) if d.nf_number else "",
         "client": d.client,
         "address": d.address,
         "city": d.city,
@@ -191,21 +193,37 @@ def get_stats(current_user: User = Depends(get_current_user), db: Session = Depe
 @app.get("/api/deliveries", response_model=List[DeliveryResponse])
 def list_deliveries(
     search: Optional[str] = Query(None),
-    status: Optional[str] = Query(None),
+    status: Optional[str] = Query("pendente"),
+    period: Optional[str] = Query("today"),
+    order: Optional[str] = Query("desc"),
+    driver: Optional[str] = Query(None),
+    company: Optional[str] = Query(None),
     skip: int = 0,
-    limit: int = 100,
+    limit: int = 20,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     query = db.query(Delivery)
     if current_user.role not in ["admin", "monitor"]:
-        # Vê se o user_id bate OU se o nome/username dele está no campo driver
         name_filter = current_user.full_name if current_user.full_name else current_user.username
         query = query.filter(
             (Delivery.user_id == current_user.id) | 
             (Delivery.driver.ilike(f"%{current_user.username}%")) |
             (Delivery.driver.ilike(f"%{name_filter}%"))
         )
+    
+    # Filtro por período
+    if period == "today":
+        today = datetime.utcnow().date()
+        query = query.filter(func.date(Delivery.created_at) == today)
+    elif period == "yesterday":
+        yesterday = datetime.utcnow().date() - timedelta(days=1)
+        query = query.filter(func.date(Delivery.created_at) == yesterday)
+    elif period == "week":
+        week_ago = datetime.utcnow() - timedelta(days=7)
+        query = query.filter(Delivery.created_at >= week_ago)
+    
+    # Filtros
     if search:
         search_lower = f"%{search.lower()}%"
         query = query.filter(
@@ -215,9 +233,43 @@ def list_deliveries(
         )
     if status and status != "all":
         query = query.filter(Delivery.status == status)
-
-    deliveries = query.order_by(Delivery.created_at.desc()).offset(skip).limit(limit).all()
-    return [format_delivery_response(d) for d in deliveries]
+    if driver:
+        query = query.filter(Delivery.driver.ilike(f"%{driver}%"))
+    if company and company != "all":
+        query = query.filter(Delivery.company == company)
+    
+    # Ordenação
+    if order == "asc":
+        query = query.order_by(Delivery.created_at.asc())
+    elif order == "value_desc":
+        query = query.order_by(Delivery.value.desc())
+    elif order == "value_asc":
+        query = query.order_by(Delivery.value.asc())
+    else:
+        query = query.order_by(Delivery.created_at.desc())
+    
+    deliveries = query.offset(skip).limit(limit).all()
+    return [{
+        "id": int(d.id) if d.id else 0,
+        "nrunico": int(d.nrunico) if d.nrunico else 0,
+        "nf_number": str(d.nf_number).split('.')[0] if d.nf_number else "",
+        "client": d.client,
+        "address": d.address,
+        "city": d.city,
+        "phone": d.phone,
+        "value": d.value,
+        "driver": d.driver,
+        "company": d.company,
+        "observations": d.observations,
+        "canhoto_url": get_canhoto_url(d.canhoto_path),
+        "status": d.status,
+        "delivery_canhoto_url": get_canhoto_url(d.delivery_canhoto_path),
+        "delivery_observations": d.delivery_observations,
+        "delivered_at": d.delivered_at,
+        "created_at": d.created_at,
+        "user_id": d.user_id,
+        "user_name": d.owner.username if d.owner else "Sistema",
+    } for d in deliveries]
 
 # --- Importar Excel ---
 @app.post("/api/deliveries/import")
@@ -235,11 +287,27 @@ async def import_deliveries(
         sheet = wb.active
         
         deliveries_imported = 0
+        
+        def safe_int(v):
+            if v is None: return 0
+            try: return int(float(str(v)))
+            except: return 0
+        
+        def safe_float(v):
+            if v is None: return 0.0
+            try: return float(str(v).replace(',', '.'))
+            except: return 0.0
+        
+        def safe_phone(v):
+            if v is None: return None
+            p = str(v).strip().strip("'").replace(' ', '')
+            return p if p and p != '0' else None
+        
         # Pular cabeçalho
         for row in sheet.iter_rows(min_row=2, values_only=True):
             if not row[0]: continue 
             
-            nf, client, addr, city, phone, val, driver, comp, obs = row[:9]
+            nrunico, nf, client, addr, city, phone, val, driver, comp, obs = row[:10]
             
             target_user_id = None
             if driver:
@@ -249,13 +317,32 @@ async def import_deliveries(
                 ).first()
                 if d_user: target_user_id = d_user.id
 
+            # ADR-001: validar duplicata por nrunico (unico global)
+            if nrunico:
+                existing = db.query(Delivery).filter(
+                    Delivery.nrunico == safe_int(nrunico)
+                ).first()
+                if existing:
+                    print(f"Skipping NF {nf} - nrunico {nrunico} ja existe")
+                    continue
+            
+            # Fallback: validar duplicata por NF + Empresa
+            existing = db.query(Delivery).filter(
+                Delivery.nf_number == str(safe_int(nf)),
+                Delivery.company == (str(comp) if comp else "LDR")
+            ).first()
+            if existing:
+                print(f"Skipping NF {nf} - ja existe para empresa {comp or 'LDR'}")
+                continue
+
             db_delivery = Delivery(
-                nf_number=str(nf),
+                nrunico=safe_int(row[0]),
+                nf_number=str(safe_int(nf)),
                 client=str(client),
                 address=str(addr),
                 city=str(city) if city else None,
-                phone=str(phone) if phone else None,
-                value=float(val) if val else 0.0,
+                phone=safe_phone(phone),
+                value=safe_float(val),
                 driver=str(driver) if driver else None,
                 company=str(comp) if comp else "LDR",
                 observations=str(obs) if obs else None,
@@ -311,11 +398,26 @@ async def create_delivery(
     value: Optional[float] = Form(None),
     driver: Optional[str] = Form(None),
     company: Optional[str] = Form(None),
+    nrunico: Optional[int] = Form(None),
     observations: Optional[str] = Form(None),
     canhoto: Optional[UploadFile] = File(None),
     current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
+    # ADR-001: validar duplicata por nrunico (unico global)
+    if nrunico:
+        existing = db.query(Delivery).filter(Delivery.nrunico == nrunico).first()
+        if existing:
+            raise HTTPException(status_code=400, detail=f"nrunico {nrunico} ja existe")
+    
+    # Validar duplicata por NF + Empresa
+    existing = db.query(Delivery).filter(
+        Delivery.nf_number == nf_number,
+        Delivery.company == company
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail=f"NF {nf_number} ja existe para empresa {company}")
+    
     canhoto_path = None
     if canhoto:
         canhoto_path = save_upload_file(canhoto, nf_number, "original")
@@ -331,6 +433,7 @@ async def create_delivery(
 
     db_delivery = Delivery(
         nf_number=nf_number,
+        nrunico=nrunico,
         client=client,
         address=address,
         city=city,

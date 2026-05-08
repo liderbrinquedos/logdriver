@@ -1,21 +1,8 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-venv/
-.venv/
-
-# Database
-backend/liderlog.db
-backend/liderlog.db.bak
-
-# Uploads (Imagens de teste)
-backend/uploads/*
-!backend/uploads/.gitkeep
-
-# OS
+*.Zone.Identifier
+logdriver-brain.tar.gz
+LIDERDRIVER_IMPORT.xlsx
+__pycache__
+*.pyc
+*.pyo
+.env
 .DS_Store
-Thumbs.db
-
-# Docker
-.docker/
