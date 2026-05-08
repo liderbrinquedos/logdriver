@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 
 
@@ -66,6 +66,7 @@ class DeliveryConfirm(BaseModel):
 # Schema de resposta
 class DeliveryResponse(BaseModel):
     id: int
+    nrunico: Optional[int] = None
     nf_number: str
     client: str
     address: str
@@ -86,6 +87,13 @@ class DeliveryResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class DeliveryListResponse(BaseModel):
+    items: List[DeliveryResponse]
+    total: int
+    skip: int
+    limit: int
 
 
 # Schema para estatísticas

@@ -577,10 +577,9 @@
                     </div>
                     <div class="form-group">
                         <label>Motorista</label>
-                        <input type="text" id="driver" list="driversDataList" placeholder="Selecione ou digite o nome">
-                        <datalist id="driversDataList">
-                            <!-- Injetado via JS -->
-                        </datalist>
+                        <select id="driver">
+                            <option value="">Selecione um motorista (opcional)</option>
+                        </select>
                     </div>
                     <div class="form-group">
                         <label>Endereço Completo</label>
@@ -818,15 +817,16 @@
                 const drivers = await resp.json();
                 console.log('Motorista encontrados:', drivers.length);
                 
-                const datalist = document.getElementById('driversDataList');
                 const filterDriver = document.getElementById('filterDriver');
-                datalist.innerHTML = drivers.map(d => {
-                    const name = d.full_name || d.username;
-                    return `<option value="${name}">${d.username}</option>`;
-                }).join('');
+                const driverSelect = document.getElementById('driver');
                 
                 if (filterDriver) {
-                    filterDriver.innerHTML = '<option value="">Todos Mototista</option>' + 
+                    filterDriver.innerHTML = '<option value="">Todos Motoristas</option>' + 
+                        drivers.map(d => `<option value="${d.full_name || d.username}">${d.username}</option>`).join('');
+                }
+                
+                if (driverSelect) {
+                    driverSelect.innerHTML = '<option value="">Selecione um motorista (opcional)</option>' + 
                         drivers.map(d => `<option value="${d.full_name || d.username}">${d.username}</option>`).join('');
                 }
             } catch (e) {
@@ -876,10 +876,11 @@
                 if (search) url += `&search=${encodeURIComponent(search)}`;
                 
                 const response = await authFetch(url);
-                deliveries = await response.json();
+                const data = await response.json();
+                deliveries = data.items || data;
                 renderDeliveries();
                 updateStats();
-            } catch (e) { showNotification('Erro ao carregar dados', 'error'); }
+            } catch (e) { console.error('Erro ao carregar dados:', e); showNotification('Erro ao carregar dados', 'error'); }
         }
 
         function applyFilters() {

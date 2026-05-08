@@ -16,6 +16,7 @@ from database import engine, get_db
 from models import Base, Delivery, User
 from schemas import (
     DeliveryResponse,
+    DeliveryListResponse,
     DeliveryStatusUpdate,
     DeliveryStats,
     UserCreate,
@@ -288,7 +289,7 @@ def get_stats(current_user: User = Depends(get_current_user), db: Session = Depe
     )
 
 # --- Listar entregas ---
-@app.get("/api/deliveries", response_model=List[DeliveryResponse])
+@app.get("/api/deliveries", response_model=DeliveryListResponse)
 def list_deliveries(
     search: Optional[str] = Query(None),
     status: Optional[str] = Query("pendente"),
