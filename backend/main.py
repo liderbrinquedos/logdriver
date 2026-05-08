@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, StreamingResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
 from typing import List, Optional
 from datetime import datetime, timedelta
@@ -57,8 +57,8 @@ def require_admin_or_monitor(user: User = Depends(get_current_user)):
 # Criar tabelas no banco
 Base.metadata.create_all(bind=engine)
 
-# Configurar diretório de uploads
-UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
+# Diretorio de uploads configuravel
+UPLOAD_DIR = os.getenv("UPLOAD_DIR", os.path.join(os.path.dirname(__file__), "uploads"))
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 app = FastAPI(
@@ -67,34 +67,132 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# CORS
+# CORS configurável via env (default apenas localhost:8021)
+allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:8021").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Servir arquivos estáticos (uploads)
-app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
+# Diretório de uploads configurável
+UPLOAD_DIR = os.getenv("UPLOAD_DIR", os.path.join(os.path.dirname(__file__), "uploads"))
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+IMAGENS_DIR = os.path.join(UPLOAD_DIR, "imagens")
+os.makedirs(IMAGENS_DIR, exist_ok=True)
 
 # Diretório do frontend
 FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)))
 
-def save_upload_file(file: UploadFile, nf_number: str, suffix: str) -> str:
+def compress_image(file: UploadFile) -> tuple[bytes, str]:
+    """
+    Comprime imagem JPEG/PNG/WEBP para otimizar armazenamento e upload.
+    HEIC/HEIF são convertidos para JPEG.
+    Retorna: (bytes_comprimidos, extensao)
+    """
+    try:
+        img = Image.open(file.file)
+        
+        # Converter WEBP/HEIC para JPEG
+        if img.format in ('WEBP', 'HEIF', 'HEIC', 'BMP', 'TIFF'):
+            img = img.convert('RGB')
+            ext = '.jpg'
+        else:
+            ext = os.path.splitext(file.filename)[1].lower()
+        
+        # Redimensionar se maior que 1920px
+        max_dim = 1920
+        if max(img.size) > max_dim:
+            ratio = max_dim / max(img.size)
+            new_size = (int(img.size[0] * ratio), int(img.size[1] * ratio))
+            img = img.resize(new_size, Image.Resampling.LANCZOS)
+        
+        # Comprimir
+        buf = io.BytesIO()
+        if ext in ('.jpg', '.jpeg'):
+            img.save(buf, format='JPEG', quality=80, optimize=True)
+        else:
+            img.save(buf, format='PNG', optimize=True)
+        
+        return buf.getvalue(), ext
+    except Exception as e:
+        print(f"Erro ao comprimir imagem: {e}")
+        file.file.seek(0)
+        return file.file.read(), os.path.splitext(file.filename)[1].lower()
+
+
+def validate_image(file: UploadFile) -> None:
+    """Valida tipo e tamanho da imagem."""
+    ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif'}
+    MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10MB
+    
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Formato {ext} nao suportado")
+    
+    # Validar tamanho
+    file.file.seek(0, 2)
+    size = file.file.tell()
+    file.file.seek(0)
+    if size > MAX_UPLOAD_SIZE:
+        raise HTTPException(status_code=400, detail="Arquivo excede 10MB")
+
+
+def save_upload_file(file: UploadFile, nf_number: str, nrunico: Optional[int], suffix: str) -> str:
+    # Validar tipo e tamanho
+    ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif'}
+    MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10MB
+    
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(400, f"Formato {ext} nao suportado")
+    
+    # Validar tamanho
+    file.file.seek(0, 2)
+    size = file.file.tell()
+    file.file.seek(0)
+    if size > MAX_UPLOAD_SIZE:
+        raise HTTPException(400, "Arquivo excede 10MB")
+    
+    # Comprimir imagem se JPEG/PNG
+    if ext in ('.jpg', '.jpeg', '.png', '.webp'):
+        compressed_data, new_ext = compress_image(file)
+        ext = new_ext
+    else:
+        # Para HEIC/HEIF, ler os bytes diretamente
+        compressed_data = file.file.read()
+    
+    # Gerar nome com nrunico
     timestamp = int(datetime.utcnow().timestamp())
-    ext = os.path.splitext(file.filename)[1] if file.filename else ".jpg"
-    filename = f"{timestamp}_NF{nf_number}_{suffix}{ext}"
-    filepath = os.path.join(UPLOAD_DIR, filename)
+    filename = f"nf{nf_number}_nr{nrunico or timestamp}_{suffix}{ext}"
+    
+    # Salvar em subpasta 'imagens'
+    imagens_dir = os.path.join(UPLOAD_DIR, "imagens")
+    os.makedirs(imagens_dir, exist_ok=True)
+    filepath = os.path.join(imagens_dir, filename)
+    
     with open(filepath, "wb") as buffer:
-        buffer.write(file.file.read())
-    return f"/uploads/{filename}"
+        buffer.write(compressed_data)
+    
+    return f"/api/uploads/{filename}"
 
 def get_canhoto_url(path: Optional[str]) -> Optional[str]:
     if not path: return None
     if path.startswith("http"): return path
     return path
+
+
+@app.get("/api/uploads/{filename}")
+async def get_uploaded_file(filename: str, current_user: User = Depends(get_current_user)):
+    """Serve arquivos de canhoto autenticados."""
+    # Remover possíveis diretórios pai (path traversal)
+    safe_filename = os.path.basename(filename)
+    file_path = os.path.join(IMAGENS_DIR, safe_filename)
+    if not os.path.isfile(file_path):
+        raise HTTPException(status_code=404, detail="Arquivo não encontrado")
+    return FileResponse(file_path)
 
 
 def format_delivery_response(d: Delivery) -> dict:
@@ -199,11 +297,11 @@ def list_deliveries(
     driver: Optional[str] = Query(None),
     company: Optional[str] = Query(None),
     skip: int = 0,
-    limit: int = 20,
+    limit: int = Query(20, ge=1, le=200),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    query = db.query(Delivery)
+    query = db.query(Delivery).options(joinedload(Delivery.owner))
     if current_user.role not in ["admin", "monitor"]:
         name_filter = current_user.full_name if current_user.full_name else current_user.username
         query = query.filter(
@@ -248,28 +346,14 @@ def list_deliveries(
     else:
         query = query.order_by(Delivery.created_at.desc())
     
+    total = query.count()
     deliveries = query.offset(skip).limit(limit).all()
-    return [{
-        "id": int(d.id) if d.id else 0,
-        "nrunico": int(d.nrunico) if d.nrunico else 0,
-        "nf_number": str(d.nf_number).split('.')[0] if d.nf_number else "",
-        "client": d.client,
-        "address": d.address,
-        "city": d.city,
-        "phone": d.phone,
-        "value": d.value,
-        "driver": d.driver,
-        "company": d.company,
-        "observations": d.observations,
-        "canhoto_url": get_canhoto_url(d.canhoto_path),
-        "status": d.status,
-        "delivery_canhoto_url": get_canhoto_url(d.delivery_canhoto_path),
-        "delivery_observations": d.delivery_observations,
-        "delivered_at": d.delivered_at,
-        "created_at": d.created_at,
-        "user_id": d.user_id,
-        "user_name": d.owner.username if d.owner else "Sistema",
-    } for d in deliveries]
+    return {
+        "items": [format_delivery_response(d) for d in deliveries],
+        "total": total,
+        "skip": skip,
+        "limit": limit
+    }
 
 # --- Importar Excel ---
 @app.post("/api/deliveries/import")
@@ -420,7 +504,8 @@ async def create_delivery(
     
     canhoto_path = None
     if canhoto:
-        canhoto_path = save_upload_file(canhoto, nf_number, "original")
+        validate_image(canhoto)
+        canhoto_path = save_upload_file(canhoto, nf_number, nrunico, "original")
 
     target_user_id = None 
     if driver:
@@ -499,8 +584,9 @@ async def confirm_delivery(
 
     delivery_canhoto_path = None
     if delivery_canhoto:
+        validate_image(delivery_canhoto)
         delivery_canhoto_path = save_upload_file(
-            delivery_canhoto, delivery.nf_number, "entrega"
+            delivery_canhoto, delivery.nf_number, delivery.nrunico, "entrega"
         )
         delivery.delivery_canhoto_path = delivery_canhoto_path
 
@@ -520,6 +606,18 @@ def delete_delivery(delivery_id: int, current_user: User = Depends(require_admin
         raise HTTPException(status_code=404, detail="Entrega não encontrada")
     db.delete(delivery)
     db.commit()
+    
+    # Remover arquivos de canhoto do disco
+    for path_attr in ['canhoto_path', 'delivery_canhoto_path']:
+        path = getattr(delivery, path_attr)
+        if path:
+            file_path = os.path.join(UPLOAD_DIR, path.lstrip('/'))
+            if os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                except Exception as e:
+                    print(f"Erro ao remover arquivo {file_path}: {e}")
+    
     return None
 
 # --- Health check ---

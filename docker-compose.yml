@@ -2,13 +2,13 @@ services:
   backend:
     build: ./backend
     container_name: liderlog_backend
-    ports:
-      - "8000:8000"
     volumes:
       - backend_uploads:/app/uploads
       - backend_db:/app/data
     environment:
-      - SECRET_KEY=${SECRET_KEY:-liderlog-secret-key-change-in-production-2024}
+      - SECRET_KEY=${SECRET_KEY:-}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:8021}
+      - UPLOAD_DIR=/app/uploads
     restart: always
 
   frontend:

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, Text, Boolean, ForeignKey
+from sqlalchemy import Column, Integer, String, Float, Numeric, DateTime, Text, Boolean, ForeignKey
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from database import Base
@@ -29,16 +29,16 @@ class Delivery(Base):
     address = Column(String, nullable=False)
     city = Column(String, nullable=True)
     phone = Column(String, nullable=True)
-    value = Column(Float, nullable=True)
-    driver = Column(String, nullable=True)
-    company = Column(String, nullable=True)
+    value = Column(Numeric(10, 2), nullable=True, default=0)
+    driver = Column(String, nullable=True, index=True)
+    company = Column(String, nullable=True, index=True)
     observations = Column(Text, nullable=True)
     canhoto_path = Column(String, nullable=True)
     status = Column(String, default="pendente", index=True)
     delivery_canhoto_path = Column(String, nullable=True)
     delivery_observations = Column(Text, nullable=True)
     delivered_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     
-    owner = relationship("User", back_populates="deliveries")
+    owner = relationship("User", back_populates="deliveries", lazy='joined')
